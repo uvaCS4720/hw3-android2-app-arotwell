@@ -3,7 +3,7 @@ package edu.nd.pmcburne.hwapp.one
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
-object RetrofitClient
+object RetrofitClient {
     private const val BASE_URL = "https://ncaa-api.henrygd.me/"
 
     val apiService: NcaaApiService by lazy {
@@ -12,4 +12,5 @@ object RetrofitClient
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(NcaaApiService::class.java)
+    }
 }

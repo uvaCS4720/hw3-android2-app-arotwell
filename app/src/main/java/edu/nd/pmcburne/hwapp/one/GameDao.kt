@@ -12,8 +12,8 @@ interface GameDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertGames(games: List<GameEntity>)
 
-    @Query("SELECT * FROM games WHERE date = :date AND gender = :gender ORDER BY startTime")
-    fun getGames(date: String, gender: String): List<GameEntity>
+    @Query("SELECT * FROM games WHERE date = :date AND gender = :gender ORDER BY startTime ASC")
+    suspend fun getGames(date: String, gender: String): List<GameEntity>
 
     @Query("DELETE FROM games WHERE date = :date AND gender = :gender")
     suspend fun clearGames(date: String, gender: String)

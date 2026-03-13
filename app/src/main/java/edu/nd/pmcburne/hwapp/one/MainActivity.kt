@@ -25,16 +25,12 @@ import androidx.room.Room
 import java.text.SimpleDateFormat
 import java.util.*
 
-// ─────────────────────────────────────────────
-// Activity
-// ─────────────────────────────────────────────
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var database: AppDatabase
     private lateinit var repository: GameRepository
 
-    private lateinit var apiService: NcaaApiService
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,7 +41,7 @@ class MainActivity : ComponentActivity() {
             "games_database"
         ).build()
 
-        repository = GameRepository(apiService, database)
+        repository = GameRepository(RetrofitClient.apiService, database)
 
         val viewModel = ViewModelProvider(
             this,
@@ -64,10 +60,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ─────────────────────────────────────────────
-// Root screen
-// ─────────────────────────────────────────────
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NcaaScoresScreen(viewModel: GameViewModel) {
@@ -75,27 +67,28 @@ fun NcaaScoresScreen(viewModel: GameViewModel) {
     val uiState by viewModel.uiState.collectAsState()
     var showDatePicker by remember { mutableStateOf(false) }
 
-    // Initialise the date-picker at the currently selected date
     val initialMillis = remember(uiState.selectedDate) {
         runCatching {
             val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-            sdf.timeZone = TimeZone.getTimeZone("UTC")
+            sdf.timeZone = TimeZone.getTimeZone("EST")
             sdf.parse(uiState.selectedDate)?.time ?: System.currentTimeMillis()
         }.getOrDefault(System.currentTimeMillis())
     }
 
     val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
 
-    // ── Date-picker dialog ───────────────────
     if (showDatePicker) {
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
                     datePickerState.selectedDateMillis?.let { millis ->
-                        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                        sdf.timeZone = TimeZone.getTimeZone("EST")
-                        viewModel.onDateSelected(sdf.format(Date(millis)))
+                        val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+                        utcCal.timeInMillis = millis
+                        val year  = utcCal.get(Calendar.YEAR)
+                        val month = String.format("%02d", utcCal.get(Calendar.MONTH) + 1)
+                        val day   = String.format("%02d", utcCal.get(Calendar.DAY_OF_MONTH))
+                        viewModel.onDateSelected("$year-$month-$day")
                     }
                     showDatePicker = false
                 }) { Text("OK") }
@@ -108,7 +101,6 @@ fun NcaaScoresScreen(viewModel: GameViewModel) {
         }
     }
 
-    // ── Scaffold ─────────────────────────────
     Scaffold(
         topBar = {
             TopAppBar(
@@ -133,7 +125,6 @@ fun NcaaScoresScreen(viewModel: GameViewModel) {
                 .padding(padding)
         ) {
 
-            // ── Offline banner ───────────────
             if (uiState.isOffline || uiState.error != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer,
@@ -149,7 +140,6 @@ fun NcaaScoresScreen(viewModel: GameViewModel) {
                 }
             }
 
-            // ── Date picker button ───────────
             OutlinedButton(
                 onClick = { showDatePicker = true },
                 modifier = Modifier
@@ -165,7 +155,6 @@ fun NcaaScoresScreen(viewModel: GameViewModel) {
                 Text("Date: ${uiState.selectedDate}")
             }
 
-            // ── Men's / Women's toggle ───────
             SingleChoiceSegmentedButtonRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -186,7 +175,6 @@ fun NcaaScoresScreen(viewModel: GameViewModel) {
 
             Spacer(Modifier.height(8.dp))
 
-            // ── Loading spinner ──────────────
             if (uiState.isLoading) {
                 Box(
                     modifier = Modifier
@@ -198,7 +186,6 @@ fun NcaaScoresScreen(viewModel: GameViewModel) {
                 }
             }
 
-            // ── Empty state ──────────────────
             if (!uiState.isLoading && uiState.games.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -212,7 +199,6 @@ fun NcaaScoresScreen(viewModel: GameViewModel) {
                 }
             }
 
-            // ── Games list ───────────────────
             LazyColumn(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -225,14 +211,9 @@ fun NcaaScoresScreen(viewModel: GameViewModel) {
     }
 }
 
-// ─────────────────────────────────────────────
-// Game card
-// ─────────────────────────────────────────────
-
 @Composable
 fun GameCard(game: GameEntity, gender: String) {
 
-    // Normalise the status string coming from the NCAA API
     val status = game.gameStatus?.lowercase().orEmpty()
     val isLive = status.contains("live") || status.contains("progress") || status == "in_progress"
     val isFinal = status.contains("final") || status.contains("complete") ||
@@ -245,14 +226,11 @@ fun GameCard(game: GameEntity, gender: String) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-
-            // ── Status / clock row ───────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Status badge
                 val statusLabel = when {
                     isFinal -> "FINAL"
                     isLive  -> "● LIVE"
@@ -271,7 +249,6 @@ fun GameCard(game: GameEntity, gender: String) {
                     letterSpacing = 0.5.sp
                 )
 
-                // Period + clock (live only); "Final" instead of clock when done
                 when {
                     isLive -> {
                         val period = periodLabel(game.gamePeriod, gender)
@@ -284,7 +261,6 @@ fun GameCard(game: GameEntity, gender: String) {
                         )
                     }
                     isFinal -> {
-                        // Period label still shows for F/OT clarity
                         if (!game.gamePeriod.isNullOrBlank()) {
                             Text(
                                 text = periodLabel(game.gamePeriod, gender),
@@ -300,7 +276,6 @@ fun GameCard(game: GameEntity, gender: String) {
             HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
             Spacer(Modifier.height(8.dp))
 
-            // ── Away team ────────────────────
             TeamRow(
                 label        = "Away",
                 teamName     = game.awayTeam,
@@ -310,7 +285,6 @@ fun GameCard(game: GameEntity, gender: String) {
 
             Spacer(Modifier.height(6.dp))
 
-            // ── Home team ────────────────────
             TeamRow(
                 label        = "Home",
                 teamName     = game.homeTeam,
@@ -318,7 +292,6 @@ fun GameCard(game: GameEntity, gender: String) {
                 isWinner     = isFinal && game.homeWinner
             )
 
-            // ── Tip-off time (upcoming only) ─
             if (isUpcoming) {
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -330,10 +303,6 @@ fun GameCard(game: GameEntity, gender: String) {
         }
     }
 }
-
-// ─────────────────────────────────────────────
-// Team row within a card
-// ─────────────────────────────────────────────
 
 @Composable
 fun TeamRow(
@@ -347,7 +316,6 @@ fun TeamRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        // Left: label + name (+ trophy if winner)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.weight(1f)
@@ -380,16 +348,7 @@ fun TeamRow(
     }
 }
 
-// ─────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────
 
-/**
- * Converts a raw period string (e.g. "1", "2", "3") into a human-readable label.
- *
- * Men's NCAA basketball uses two 20-minute halves.
- * Women's NCAA basketball uses four 10-minute quarters.
- */
 fun periodLabel(period: String?, gender: String): String {
     if (period.isNullOrBlank()) return ""
     val num = period.filter { it.isDigit() }.toIntOrNull()
@@ -412,17 +371,20 @@ fun periodLabel(period: String?, gender: String): String {
     }
 }
 
-/**
- * Converts a 24-hour time string (HH:mm or HH:mm:ss) to a user-friendly 12-hour format.
- */
 fun String.toDisplayTime(): String {
-    val patterns = listOf("HH:mm:ss", "HH:mm", "h:mm a", "h:mma")
+    val cleaned = this
+        .replace(" ET", "", ignoreCase = true)
+        .replace(" EST", "", ignoreCase = true)
+        .replace(" EDT", "", ignoreCase = true)
+        .trim()
+
+    val patterns = listOf("h:mm a", "hh:mm a", "HH:mm:ss", "HH:mm")
     for (pattern in patterns) {
         runCatching {
             val sdf = SimpleDateFormat(pattern, Locale.US)
             val out = SimpleDateFormat("h:mm a", Locale.US)
-            return out.format(sdf.parse(this)!!)
+            return out.format(sdf.parse(cleaned)!!)
         }
     }
-    return this   // fall back to raw string if nothing parses
+    return this
 }

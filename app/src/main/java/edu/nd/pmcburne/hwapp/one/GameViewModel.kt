@@ -7,8 +7,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 data class GameUiState(
     val games: List<GameEntity> = emptyList(),
@@ -21,6 +23,7 @@ data class GameUiState(
     companion object {
         fun todayDateString(): String {
             val formatter = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            formatter.timeZone = TimeZone.getTimeZone("EST")
             return formatter.format(Date())
         }
     }
@@ -55,9 +58,10 @@ class GameViewModel(
             try {
                 val fetchedGames = repository.loadGames(date, gender)
                 _uiState.value = _uiState.value.copy(
-                    games = fetchedGames.games,
+                    games = fetchedGames.games.sortedBy { startTimeToMinutes(it.startTime) },
                     isLoading = false,
-                    error = null
+                    isOffline = fetchedGames.isOffline,
+                    error = fetchedGames.errorMessage
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
@@ -67,4 +71,16 @@ class GameViewModel(
             }
         }
     }
+
+}
+fun startTimeToMinutes(startTime: String): Int {
+    return runCatching {
+        val cleaned = startTime
+            .replace(Regex(" E[SD]?T", RegexOption.IGNORE_CASE), "")
+            .trim()
+        val sdf = SimpleDateFormat("h:mm a", Locale.US)
+        val date = sdf.parse(cleaned)!!
+        val cal = Calendar.getInstance().apply { time = date }
+        cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+    }.getOrElse { Int.MAX_VALUE }
 }
